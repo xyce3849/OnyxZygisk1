@@ -21,12 +21,14 @@ val verName by extra("v1.09")
 val verCode by extra(gitCommitCount + 3)
 val commitHash by extra(gitCommitHash)
 val minAPatchVersion by extra(10762)
-// 放宽 KernelSU 版本边界：默认 [10940, 30000] 会拒绝 30000+gitcount 的新版内核
-// （如 32656），报 "TooOld / Invalid root implementation"。这里放开区间，
-// 让自定义包名、新版内核都能被识别。若想保留下限保护，把 0 改回 10940 即可。
-val minKsuVersion by extra(0)
+// Lowered from 10940: custom / self-built KernelSU forks (e.g. "16-5" builds)
+// report a non-standard KERNEL_SU_VERSION code that is well below the upstream
+// floor, but are otherwise fully functional. The runtime detection in
+// zygiskd/src/root_impl/kernelsu.rs no longer enforces this floor either; this
+// value only guards the install-time customize.sh check now.
+val minKsuVersion by extra(1)
 val minKsudVersion by extra(11425)
-val maxKsuVersion by extra(99999)
+val maxKsuVersion by extra(30000)
 val minMagiskVersion by extra(26402)
 val workDirectory by extra("/data/adb/onyxzygisk")
 
