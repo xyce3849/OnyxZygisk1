@@ -21,9 +21,12 @@ val verName by extra("v1.09")
 val verCode by extra(gitCommitCount + 3)
 val commitHash by extra(gitCommitHash)
 val minAPatchVersion by extra(10762)
-val minKsuVersion by extra(10940)
+// 放宽 KernelSU 版本边界：默认 [10940, 30000] 会拒绝 30000+gitcount 的新版内核
+// （如 32656），报 "TooOld / Invalid root implementation"。这里放开区间，
+// 让自定义包名、新版内核都能被识别。若想保留下限保护，把 0 改回 10940 即可。
+val minKsuVersion by extra(0)
 val minKsudVersion by extra(11425)
-val maxKsuVersion by extra(30000)
+val maxKsuVersion by extra(99999)
 val minMagiskVersion by extra(26402)
 val workDirectory by extra("/data/adb/onyxzygisk")
 
