@@ -14,7 +14,7 @@
 //! All subsequent calls are then dispatched to the correct implementation instantly,
 //! avoiding any repeated detection overhead.
 
-use crate::constants::{MAX_KSU_VERSION, MIN_KSU_VERSION};
+use crate::constants::MAX_KSU_VERSION;
 use crate::utils::get_property;
 use log::{info, warn};
 use std::ffi::c_char;
@@ -167,12 +167,19 @@ pub fn detect_version() -> Option<Version> {
             };
             if ksuctl_ioctl(fd, KSU_IOCTL_GET_INFO, &mut cmd).is_ok() {
                 let version_code = cmd.version as i32;
+                info!("Detected KernelSU ioctl version code: {}", version_code);
                 if version_code > 0 {
                     // Success! A valid version was returned via ioctl.
                     let method = Method::Ioctl(fd);
                     let variant = ioctl_variant(fd);
                     info!("Detected KernelSU variant: {:?}", variant);
-                    if MIN_KSU_VERSION <= version_code && ksud_exists() {
+                    // NOTE: The compile-time MIN_KSU_VERSION floor is intentionally
+                    // NOT enforced here. Some custom / self-built KernelSU forks
+                    // (e.g. "16-5" builds) report a non-standard KERNEL_SU_VERSION
+                    // code far below the upstream floor, but the ioctl interface is
+                    // fully functional. As long as we got a positive version code and
+                    // `ksud` exists, treat the implementation as usable.
+                    if ksud_exists() {
                         if version_code > MAX_KSU_VERSION {
                             warn!("Support for current KernelSU (variant) could be incomplete")
                         }
@@ -181,14 +188,8 @@ pub fn detect_version() -> Option<Version> {
                             method,
                             version: Version::Supported,
                         });
-                    } else if version_code < MIN_KSU_VERSION {
-                        // Version is too old but detected. Cache the result and finish.
-                        return Some(DetectionResult {
-                            method,
-                            version: Version::TooOld,
-                        });
                     }
-                    // If version is too high or ksud is missing, we fall through, treating it
+                    // If ksud is missing, we fall through, treating it
                     // as if this method failed to allow the prctl fallback to run.
                 }
             }
@@ -212,18 +213,16 @@ pub fn detect_version() -> Option<Version> {
             // Success with prctl. We must now probe for legacy capabilities.
             init_legacy_variant_probe();
             let method = Method::Prctl;
-            if MIN_KSU_VERSION <= version_code && ksud_exists() {
+            // Same relaxed policy as the ioctl path: any positive version code
+            // with `ksud` present is treated as supported, regardless of the
+            // upstream MIN_KSU_VERSION floor (custom forks report odd values).
+            if ksud_exists() {
                 if version_code > MAX_KSU_VERSION {
                     warn!("Support for current KernelSU (variant) could be incomplete")
                 }
                 return Some(DetectionResult {
                     method,
                     version: Version::Supported,
-                });
-            } else if version_code < MIN_KSU_VERSION {
-                return Some(DetectionResult {
-                    method,
-                    version: Version::TooOld,
                 });
             }
         }
