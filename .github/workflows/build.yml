@@ -1,0 +1,91 @@
+# ============================================================================
+#  OnyxZygisk — 专注构建模块的工作流（推荐使用）
+# ----------------------------------------------------------------------------
+#  作用：只做一件事 —— 检出代码（含子模块 + 完整 git 历史）→ 安装工具链 →
+#        编译并产出 Magisk/KernelSU/APatch 模块 zip → 上传为 Artifact。
+#
+#  为什么新建这个而不是改 verify.yml：
+#    - 原版 verify.yml 里的 android job 本来就能编出模块，但它把「验证」
+#      (zigcore / webui / jni 检查) 和「产出模块」混在一个文件里，任何一处
+#      挂都会让整个 CI 红，且全量跑很慢、容易误判。
+#    - 本文件把「构建模块」单独抽出来，最干净、最稳，也最容易定位问题。
+#
+#  用法：把这个文件放到你 fork 的  .github/workflows/build.yml
+#        然后在 GitHub → Actions → "Build Module" → 点 "Run workflow" 即可。
+#        （已加 workflow_dispatch，所以有手动运行按钮）
+# ============================================================================
+
+name: Build Module
+
+on:
+  push:
+  pull_request:
+  # 手动触发按钮：允许在 Actions 页面点击 "Run workflow"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Android release package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout（含子模块 + 完整历史）
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          # build.gradle.kts 用 `git rev-list HEAD --count` 算 verCode，
+          # 默认浅克隆(fetch-depth:1)会得到 1，导致版本号错误。必须取完整历史。
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # v4 默认只装 platform-tools，且显式 sdkmanager 步骤会补齐剩余组件。
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android toolchain
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "cmake;3.22.1" "ndk;27.2.12479018"
+
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.85.0
+          target: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          # 关键修复：默认的 cache: true 会让 rust-cache 在「仓库根目录」跑
+          # `cargo metadata`，但本仓库根没有 Cargo.toml（在 zygiskd/ 下），
+          # 会报 "could not find Cargo.toml" 而失败。这里关掉它，避免噪音。
+          cache: false
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 3.5.4 --locked
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: zygiskd/webui/pnpm-lock.yaml
+
+      # RUSTFLAGS: "" 覆盖 setup-rust-toolchain 默认加上的 -D warnings，
+      # 避免依赖的告警被当成错误。
+      # --stacktrace 让下次若仍失败，能直接在日志里看到 cargo 的真实报错
+      # （Gradle 的 providers.exec 默认会吞掉 cargo 的 stderr）。
+      - name: Build release module
+        env:
+          RUSTFLAGS: ""
+        run: bash ./gradlew :module:zipRelease --no-daemon --console=plain --stacktrace
+
+      - name: Upload module ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: onyxzygisk-release
+          path: module/build/outputs/release/*.zip
+          if-no-files-found: error
